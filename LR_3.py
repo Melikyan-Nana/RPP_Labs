@@ -1,6 +1,7 @@
 # Задание 1
 import http.client
 import json
+
 def operate(data: str, left: int):
 d = json.loads(data)
 if d['operation'] == 'div':
