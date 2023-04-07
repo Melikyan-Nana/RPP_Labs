@@ -1,7 +1,16 @@
 # Задание 1
 import http.client
 import json
-
+def operate(data: str, left: int):
+d = json.loads(data)
+if d['operation'] == 'div':
+return left / d['number']
+if d['operation'] == 'mul':
+return left * d['number']
+if d['operation'] == 'sum':
+return left + d['number']
+if d['operation'] == 'sub':
+return left - d['number']
 
 conn = http.client.HTTPConnection("167.172.172.227:8000")
 conn.request("GET", "/number/10")
