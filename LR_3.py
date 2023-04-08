@@ -13,52 +13,46 @@ def operate(data: str, left: int):
   if d['operation'] == 'sub':
     return left - d['number']
 
+option = 10
+result = 0
+
 conn = http.client.HTTPConnection("167.172.172.227:8000")
-conn.request("GET", "/number/10")
+conn.request("GET", "/number/" + option)
 
-r1 = conn.getresponse().read().decode()
-number1 = json.loads(r1)
-print(number1['number'])
-
+response = conn.getresponse().read().decode()
+result += json.loads(response)['number']
+print(result)
 
 # Задание 2
 conn = http.client.HTTPConnection("167.172.172.227:8000")
-conn.request("GET", "/number/?option=10")
+conn.request("GET", "/number/?option=" + option)
 
-r2 = conn.getresponse().read().decode()
-number2 = json.loads(r2)
-print(number2['operation'], number2['number'])
-res1 = int(number1['number'] / number2['number'])
-print('Результат операции = ', res1)
+response = conn.getresponse().read().decode()
+result = operate(response, result)
+print('Результат операции = ', result)
 
 # Задание 3
 headers = {'Content-type': 'application/x-www-form-urlencoded'}
-conn.request("POST", "/number/", "option=10", headers)
+conn.request("POST", "/number/", "option=" + option, headers)
 
-r3 = conn.getresponse().read().decode()
-number3 = json.loads(r3)
-print(number3['operation'], number3['number'])
-res2 = int(res1 * number3['number'])
-print('Результат операции = ', res2)
+response = conn.getresponse().read().decode()
+result = operate(response, result)
+print('Результат операции = ', result)
 
 # Задание 4
 headers = {'Content-type': 'application/json'}
-body = {"option": 10}
+body = {"option": option}
 conn.request("PUT", "/number/", json.dumps(body), headers)
 
-r4 = conn.getresponse().read().decode()
-number4 = json.loads(r4)
-print(number4['operation'], number4['number'])
-res3 = int(res2 + number4['number'])
-print('Результат операции = ', res3)
+response = conn.getresponse().read().decode()
+result = operate(response, result)
+print('Результат операции = ', result)
 
 # Задание 5
 headers = {'Content-type': 'application/json'}
-body = {"option": 10}
+body = {"option": option}
 conn.request("DELETE", "/number/", json.dumps(body), headers)
 
-r5 = conn.getresponse().read().decode()
-number5 = json.loads(r5)
-print(number5['operation'], number5['number'])
-res4 = int(res3 - number5['number'])
-print('Результат операции = ', res4)
+response = conn.getresponse().read().decode()
+result = operate(response, result)
+print('Результат операции = ', result)
