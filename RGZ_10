@@ -1,0 +1,186 @@
+from aiogram import Bot, Dispatcher, types
+from aiogram.utils import executor
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
+from aiogram.dispatcher.filters.state import State, StatesGroup
+from aiogram.dispatcher import FSMContext
+from aiogram.contrib.middlewares.logging import LoggingMiddleware
+from aiogram.types import KeyboardButton, ReplyKeyboardMarkup, Message
+
+import numpy as np
+
+import os
+import logging
+import psycopg2
+
+import requests
+import threading
+import json
+
+api_key = "API_KEY"
+
+period = 20
+risk_tolerance = 0.03
+max_potential_loss = 0.05
+
+
+def calculate_and_store_data(symbol):
+    url = f"https://www.alphavantage.co/query?function=TIME_SERIES_DAILY_ADJUSTED&symbol={symbol}&apikey={api_key}"
+    response = requests.get(url)
+    data = json.loads(response.text)
+    closing_prices = []
+    for date in list(data["Time Series (Daily)"].keys())[:int(period)]:
+        closing_prices.append(float(data["Time Series (Daily)"][date]["4. close"]))
+
+    returns = []
+    for i in range(1, len(closing_prices)):
+        returns.append((closing_prices[i] - closing_prices[i - 1]) / closing_prices[i - 1])
+
+    risk = np.std(returns)
+
+    position_size = risk_tolerance / (risk * max_potential_loss)
+
+    print(f"РћРїС‚РёРјР°Р»СЊРЅС‹Р№ СЂР°Р·РјРµСЂ РїРѕР·РёС†РёРё РґР»СЏ С†РµРЅРЅРѕР№ Р±СѓРјР°РіРё {symbol}: {position_size:.2f}")
+
+    conn = psycopg2.connect(
+        host="localhost",
+        database="RGZ_RPP",
+        user="postgre",
+        password="postgre"
+    )
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO securities(position_size) VALUES (%(position_size)s)",
+        {
+            "position_size": position_size
+        }
+    )
+    conn.commit()
+    conn.close()
+
+
+ticker = threading.Event()
+while not ticker.wait(period):
+    # РІС‹Р±СЂР°С‚СЊ РёР· Р‘Р”
+    conn = psycopg2.connect(
+        host="localhost",
+        database="RGZ_RPP",
+        user="postgre",
+        password="postgre"
+    )
+    cursor = conn.cursor()
+    # Р—Р°РїСЂР°С€РёРІР°РµРј РІСЃРµ РёРјРµСЋС‰РёРµСЃСЏ С†РµРЅРЅС‹Рµ Р±СѓРјР°РіРё
+    cursor.execute("SELECT * FROM securities")
+    found_securities = cursor.fetchall()
+    # С‡РµСЂРµР· С†РёРєР» РѕС‚РґР°С‚СЊ С„СѓРЅРєС†РёРё РѕР±СЂР°Р±РѕС‚РєРё
+    for i in found_securities:
+        calculate_and_store_data(i)
+
+
+# РђРєС‚РёРІР°С†РёСЏ СЃРёСЃС‚РµРјС‹ Р»РѕРіРёСЂРѕРІР°РЅРёСЏ
+logging.basicConfig(level=logging.INFO)
+
+# РџРѕР»СѓС‡РµРЅРёРµ С‚РѕРєРµРЅР° РёР· РїРµСЂРµРјРµРЅРЅС‹С… РѕРєСЂСѓР¶РµРЅРёСЏ
+bot_token = os.getenv('API_TOKEN')
+
+# РЎРѕР·РґР°РЅРёРµ РѕР±СЉРµРєС‚Р° С‚РёРїР° Р±РѕС‚
+bot = Bot(token=bot_token)
+
+# РРЅРёС†РёР°Р»РёР·Р°С†РёСЏ РґРёСЃРїРµС‚С‡РµСЂР° РєРѕРјР°РЅРґ
+dp = Dispatcher(bot, storage=MemoryStorage())
+
+
+class ManageStateGroup(StatesGroup):
+    Add_securities_state = State()
+    Get_securities_state = State()
+
+
+@dp.message_handler(commands=['start'])
+async def start_command(message: types.Message):
+    kb = ReplyKeyboardMarkup(is_persistent=True, resize_keyboard=True, row_width=1)
+    kb.add(KeyboardButton('/add_securities'))
+    kb.add(KeyboardButton('/get_securities_positions'))
+    await message.reply("Р”РѕР±СЂРѕ РїРѕР¶Р°Р»РѕРІР°С‚СЊ РІ Р±РѕС‚Р°", reply_markup=kb)
+
+
+@dp.message_handler(commands=['add_securities'])
+async def add_securities_command(message: types.Message):
+    await ManageStateGroup.Add_securities_state.set()
+    await message.answer('Р’РІРµРґРёС‚Рµ РёРјСЏ С†РµРЅРЅРѕР№ Р±СѓРјР°РіРё')
+
+
+@dp.message_handler(state=ManageStateGroup.Add_securities_state)
+async def save_security(message: types.Message, state: FSMContext):
+    test = message.text
+    msg = await add_security_in_database(test)
+    await message.answer(msg)
+    await state.finish()
+
+
+async def add_security_in_database(security_name: str):
+    conn = psycopg2.connect(
+        host="localhost",
+        database="RGZ_RPP",
+        user="postgre",
+        password="postgre"
+    )
+    cursor = conn.cursor()
+    # Р—Р°РїСЂР°С€РёРІР°РµРј РІСЃРµ РёРјРµСЋС‰РёРµСЃСЏ С†РµРЅРЅС‹Рµ Р±СѓРјР°РіРё
+    cursor.execute("SELECT 1 FROM securities WHERE security_name = %(security_name)s", {"security_name": security_name})
+    found_securities = cursor.fetchall()
+
+    # Р•СЃР»Рё РЅР°Р№РґРµРЅР° С…РѕС‚СЏ Р±С‹ РѕРґРЅР° С†РµРЅРЅР°СЏ Р±СѓРјР°РіР°, security_name РєРѕС‚РѕСЂРѕР№ СЃРѕРІРїР°РґР°РµС‚ СЃ С‚РµРј, С‡С‚Рѕ РјС‹ РїС‹С‚Р°РµРјСЃСЏ СЃРѕС…СЂР°РЅРёС‚СЊ, С‚РѕРіРґР°
+    # РєРёРґР°РµРј РёСЃРєР»СЋС‡РµРЅРёРµ СЃ С‚РµРєСЃС‚РѕРј "Р¦РµРЅРЅР°СЏ Р±СѓРјР°РіР° СѓР¶Рµ СЃСѓС‰РµСЃС‚РІСѓРµС‚"
+    if len(found_securities) > 0:
+        raise Exception(f"Р¦РµРЅРЅР°СЏ Р±СѓРјР°РіР° {security_name} СѓР¶Рµ СЃСѓС‰РµСЃС‚РІСѓРµС‚")
+
+    cursor.execute(
+        "INSERT INTO securities(security_name) VALUES (%(security_name)s)",
+        {
+            "security_name": security_name
+        }
+    )
+    if len(found_securities) == 0:
+        raise Exception(f"Р¦РµРЅРЅР°СЏ Р±СѓРјР°РіР° {security_name} РґРѕР±Р°РІР»РµРЅР° Рє РѕС‚СЃР»РµР¶РёРІР°РµРјС‹Рј")
+    conn.commit()
+    conn.close()
+
+
+@dp.message_handler(commands=['get_securities_positions'])
+async def get_securities_indicators_command(message: type.Message):
+    securities_indicators = get_position_size()
+    response = ""
+    if securities_indicators:
+        response = "РџРѕРєР°Р·Р°С‚РµР»Рё РґРѕС…РѕРґРЅРѕСЃС‚Рё С†РµРЅРЅС‹С… Р±СѓРјР°Рі:\n"
+        for position_size in securities_indicators:
+            response += f"{position_size[0]}: {position_size[1]} \n"
+    else:
+        response = "РџРѕРєР°Р·Р°С‚РµР»Рё РґРѕС…РѕРґРЅРѕСЃС‚Рё С†РµРЅРЅС‹С… Р±СѓРјР°Рі РЅРµ РЅР°Р№РґРµРЅС‹"
+    await bot.send_message(message.chat.id, response)
+
+
+@dp.message_handler(state=ManageStateGroup.Get_securities_state)
+async def save_stock(message: Message, state: FSMContext):
+    msg = get_position_size(message.text)
+    await message.answer(msg)
+    await state.finish()
+
+
+async def get_position_size(security_name):
+    conn = psycopg2.connect(
+        host="localhost",
+        database="RGZ_RPP",
+        user="postgre",
+        password="postgre"
+    )
+    cursor = conn.cursor()
+    cursor.execute("SELECT security_name, position_size FROM securities WHERE security_name = %(security_name)s")
+    rows = cursor.fetchall()
+    conn.close()
+    logging.info(rows)
+    return rows
+
+
+if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO)
+    dp.middleware.setup(LoggingMiddleware())
+    executor.start_polling(dp, skip_updates=True)
